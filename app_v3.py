@@ -1,7 +1,7 @@
 import streamlit as st
 from pypdf import PdfReader
 from PyPDF2 import PdfReader
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter,RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
@@ -19,20 +19,21 @@ from dotenv import load_dotenv
 
 def get_pdf_text(pdf_docs):
     text = ""
-    pdf_reader = PdfReader(pdf_docs)
-    for page in pdf_reader.pages:
-        text += page.extract_text()
+    for pdf in pdf_docs:
+        pdf_reader = PdfReader(pdf)
+        for page in pdf_reader.pages:
+            text += page.extract_text()
     return text
 
 
 def get_text_chunks(raw_text):
-    text_splitter = CharacterTextSplitter(separator='\n', chunk_size=1000, chunk_overlap=20)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=0)
     chunks = text_splitter.split_text(raw_text)
     return chunks
 
 
 def get_vector_database(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
     vectordb = FAISS.from_texts(text_chunks, embedding=embeddings)
     return vectordb
 
@@ -171,22 +172,22 @@ def main():
     with st.sidebar:
         st.subheader("Your Documents/Images")
 
-        pdf_docs = st.file_uploader("Upload your files here")
+        pdf_docs = st.file_uploader("Upload your files here",accept_multiple_files=True)
         if pdf_docs and st.button("Upload"):
             with st.spinner("Processing"):
-                if pdf_docs.name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')):
+                if pdf_docs[0].name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')):
                     st.session_state.upload_type = "image"
                     st.session_state.uploaded_image = Image.open(pdf_docs)
                     st.success("Image processed successfully!")
 
-                elif pdf_docs.name.endswith('.pdf'):
+                elif pdf_docs[0].name.endswith('.pdf'):
                     raw_text = get_pdf_text(pdf_docs)
                     text_chunks = get_text_chunks(raw_text)
                     vectordb = get_vector_database(text_chunks)
                     retriever = vectordb.as_retriever(kwargs={"k": 5})
                     keyword_search = BM25Retriever.from_texts(text_chunks)
                     keyword_search.k = 5
-                    hybrid_retriever = EnsembleRetriever(retrievers=[retriever, keyword_search], weights=[0.5, 0.5])
+                    hybrid_retriever = EnsembleRetriever(retrievers=[retriever, keyword_search], weights=[0.6, 0.4])
                     st.session_state.retriever = hybrid_retriever
                     st.session_state.rag = get_rag_chain(hybrid_retriever)
                     st.success("PDF processed successfully!")
@@ -197,11 +198,11 @@ def main():
             AIMessage(content='Hi,how may I assist you?')
     ]
     if user_question:
-        if pdf_docs and pdf_docs.name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')):
+        if pdf_docs and pdf_docs[0].name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')):
             st.image(st.session_state.uploaded_image, caption="Your Uploaded Image")
             handle_image(user_question, st.session_state.uploaded_image)
             
-        elif pdf_docs and pdf_docs.name.endswith('.pdf'):
+        elif pdf_docs and pdf_docs[0].name.endswith('.pdf'):
             answer=handle_userinput(user_question,st.session_state.history)
             
         else:
